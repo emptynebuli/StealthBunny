@@ -5,7 +5,7 @@
 ## Description
 **StealthBunny** is  a tool designed to modify HAK5's BashBunny USB gadget kernel driver to remove possible indicators of compromise. BashBunny leverages a closed-source kernel driver at `/usr/local/bunny/lib/bunny_gadget.ko` to build the system gadget and clone various USB devices. However, this driver fails to allow for mixed-case and special characters resulting in unfortunate IoCs.
 
-The default gadget configuration will *always* display the iManufacturer as `RNDIS/Ethernet Gadget`:
+The default gadget configuration will *always* display the iProduct as `RNDIS/Ethernet Gadget`:
 <p align="left">
   <img width="70%" src="images/default_gadget.png">
 </p>
