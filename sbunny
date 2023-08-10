@@ -1,0 +1,218 @@
+#!/bin/bash
+
+cat << EOM
+ @@@@@@   @@@@@@@  @@@@@@@@   @@@@@@   @@@     @@@@@@@  @@@  @@@       @@@@@@@   @@@  @@@  @@@  @@@  @@@  @@@  @@@ @@@  
+@@@@@@@   @@@@@@@  @@@@@@@@  @@@@@@@@  @@@     @@@@@@@  @@@  @@@       @@@@@@@@  @@@  @@@  @@@@ @@@  @@@@ @@@  @@@ @@@  
+!@@         @@!    @@!       @@!  @@@  @@!       @@!    @@!  @@@   ~   @@!  @@@  @@!  @@@  @@!@!@@@  @@!@!@@@  @@! !@@  
+!@!         !@!    !@!       !@!  @!@  !@!       !@!    !@!  @!@  ~~~  !@   @!@  !@!  @!@  !@!!@!@!  !@!!@!@!  !@! @!!  
+!!@@!!      @!!    @!!!:!    @!@!@!@!  @!!       @!!    @!@!@!@! ~~~~~ @!@!@!@   @!@  !@!  @!@ !!@!  @!@ !!@!   !@!@!   
+ !!@!!!     !!!    !!!!!:    !!!@!!!!  !!!       !!!    !!!@!!!! ~~~~~ !!!@!!!!  !@!  !!!  !@!  !!!  !@!  !!!    @!!!   
+     !:!    !!:    !!:       !!:  !!!  !!:       !!:    !!:  !!!  ~~~  !!:  !!!  !!:  !!!  !!:  !!!  !!:  !!!    !!:    
+    !:!     :!:    :!:       :!:  !:!   :!:      :!:    :!:  !:!   ~   :!:  !:!  :!:  !:!  :!:  !:!  :!:  !:!    :!:    
+:::: ::      ::     :: ::::  ::   :::   :: ::::   ::    ::   :::        :: ::::  ::::: ::   ::   ::   ::   ::     ::    
+:: : :       :     : :: ::    :   : :  : :: : :   :      :   : :       :: : ::    : :  :   ::    :   ::    :      :     
+                                                                                              @emptynebuli
+EOM
+
+# GADGET file path and backup details
+# GADGET_PATH="/home/mburch/scripts/stealthbunny"
+GADGET_PATH="/usr/local/bunny/lib"
+GADGET="bunny_gadget.ko"
+GADGET_SUM="7a27b30f074a40758a9e50ff80ab286d79d1b5c57519fcc5d5ecf5fcbeeee032"
+GADGET_BAK="gadget.bak"
+
+# Skip offset in GADGET
+BASE_MANF=54808       #0xD618
+BASE_MANF_STR=59462   #0xE846
+BASE_PROD=67700       #0x10874
+BASE_PROD_STR=59494   #0xE866
+BASE_SPRINT_STR=61395 #0xEFD3
+BASE_SERIAL_STR_PTR=33408 #0x8280
+BASE_SERIAL_PTR=31880 #0x7c88
+
+# Pointer references to sunxi_usb_udc
+BASE_SUNXI_PNT1=55256 #0xD7D8
+BASE_SUNXI_PNT2=19868 #0x4D9C
+BASE_SUNXI_PNT3=51252 #0xC834
+
+# Gadget Patching
+PATCH_FILE="/tmp/patch.bin" # temp patch file
+MANF_OFFSET="\x12\xe8\x01\x00" # iManufacturer control str offset
+PROD_OFFSET="\x32\xe8\x01\x00" # iProduct control str offset
+MANF_PTR_PATCH="\xd8\x01\x00\x00" # sunxi_usb_udc pointer redirect to control str
+PROD_PTR_PATCH="\xf8\x01\x00\x00" # RNDIS/Ethernet pointer redirect to control str
+MANF_LENGTH=""
+# snprintf assembly patch
+MANF_PATCH=("\xbc\x31\x9f\xe5" `# ldr        _min1,[DAT_0001d7a8]                    `\
+            "\x32\x10\xa0\xe3" `# mov        r1,#0x<string-length>                   `\
+            "\x2c\x61\x9f\xe5" `# ldr        r6,[DAT_0001d720]                       `\
+            "\xb4\x21\x9f\xe5" `# ldr        r2=>s_%s_with_%s_0001ef9f,[DAT_0001d7ac]`\
+            "\xa8\x31\x9f\xe5" `# ldr        _min1,[DAT_0001d7a4]                    `\
+            "\x00\xf0\x20\xe3" `# nop                                                `\
+            "\x00\xf0\x20\xe3" `# nop                                                `\
+            "\x00\xf0\x20\xe3" `# nop                                                `\
+            "\xea\x0f\x86\xe2" `# add        retp=>manufacturer,r6,#0x3a8            `
+)
+
+SERIAL_PTR_PATCH="\xf0\x25\x9f\x35"
+SERIAL_STR_PTR_PATCH="\xbe\x0e\x00\x00"
+# SERIAL_PATCH=("\x40\x31\x1f\xe5" \
+#               "\x3c\x30\x43\xe2" \
+#               "\x09\x3c\x43\xe2" )
+
+hexlength() {
+    blength=$(echo $1 | wc -c)
+    hlength=$(printf '%x' $blength)
+    hex="0$hlength"
+    length="${hex:(-2)}"
+
+    # value length limit to 50 characters
+    if [[ "0x$length" -gt 0x32 ]]; then
+        MANF_LENGTH="\x32"
+    else
+        MANF_LENGTH="\x$length"
+    fi
+}
+
+buildPatch() {
+    patch=''
+    PATCH_SIZE=''
+
+    for str in "$@"; do
+        patch+=$str
+    done
+
+    PATCH_SIZE=$(echo -ne $patch | wc -c)
+    echo -ne $patch > $PATCH_FILE
+}
+
+buildMANFPatch() {
+    patch=''
+    PATCH_SIZE=''
+    count=1
+
+    for str in "$@"; do
+        # patch length of manufacturer value
+        if [ $count == 2 ]; then
+            str=$MANF_LENGTH${str: -12}
+        fi
+        patch+=$str
+        ((count=count+1))
+    done
+
+    PATCH_SIZE=$(echo -ne $patch | wc -c)
+    echo -ne $patch > $PATCH_FILE
+}
+
+padding() {
+    length=$(echo $1 | wc -c)
+
+    echo -ne ${1:0:31} > $PATCH_FILE
+    if [ $length -lt $2 ]; then
+        echo "[*] Padding string buffer"
+        for count in $(seq $length 31); do
+            echo -ne "\x00" >> $PATCH_FILE
+        done
+    fi
+}
+
+status() {
+    if [ $1 -eq 0 ]; then
+        echo "[+] Patching Successful"
+    else
+        echo "[-] Patching Failed"
+    fi
+}
+
+backcheck() {
+    if [ ! -f "$GADGET_PATH/$GADGET_BAK" ]; then
+        echo "[*] Creating GADGET Backup"
+        cp "$GADGET_PATH/$GADGET" "$GADGET_PATH/$GADGET_BAK"
+    else
+        sum=$(sha256sum "$GADGET_PATH/$GADGET_BAK" | awk '{print $1}')
+
+        if [ $sum != $GADGET_SUM ]; then
+            echo "[-] Backup verification failure"
+            exit 1
+        else
+            echo "[+] Backup verification successful"
+        fi
+    fi
+}
+
+if [ "$#" -lt 1 ]; then
+    echo "Usage:                    sbunny [ restore | <iManufacturer> <iProduct> ]"
+    exit 1
+else
+    backcheck
+
+    case $1 in 
+        "restore")
+            cp "$GADGET_PATH/$GADGET_BAK" "$GADGET_PATH/$GADGET"
+            if [ $? == 0 ]; then
+                echo "[+] Backup Restored"
+                exit 0
+            fi
+
+            echo "[-] Backup Restore Failed"
+            exit 1
+            ;;
+
+        *)
+            if [[ ! -z "$1" ]]; then
+                echo "[*] Patching Format String"
+                padding "%s" "13" # patch "%s %s with %s" string with padding
+                dd if=$PATCH_FILE of="$GADGET_PATH/$GADGET" bs=1 seek=$BASE_SPRINT_STR count=13 conv=notrunc >/dev/null 2>/dev/null
+                status $?
+
+                echo "[*] Patching SNPRINTF Statement"
+                hexlength "$1"
+                buildMANFPatch "${MANF_PATCH[@]}"
+                # cat $PATCH_FILE | hexdump -C
+                dd if=$PATCH_FILE of="$GADGET_PATH/$GADGET" bs=1 seek=$BASE_MANF count=$PATCH_SIZE conv=notrunc >/dev/null 2>/dev/null
+                status $?
+
+                echo "[*] Patching Manufacturer String Pointer #1"
+                echo -ne $MANF_PTR_PATCH > $PATCH_FILE
+                dd if=$PATCH_FILE of="$GADGET_PATH/$GADGET" bs=1 seek=$BASE_SUNXI_PNT1 count=4 conv=notrunc >/dev/null 2>/dev/null
+                status $?
+                # echo "[*] Patching Manufacturer String Pointer #2"
+                # # echo -ne $MANF_PTR_PATCH > $PATCH_FILE
+                # dd if=$PATCH_FILE of="$GADGET_PATH/$GADGET" bs=1 seek=$BASE_SUNXI_PNT2 count=4 conv=notrunc >/dev/null 2>/dev/null
+                # status $?
+                # echo "[*] Patching Manufacturer String Pointer #3"
+                # # echo -ne $MANF_PTR_PATCH > $PATCH_FILE
+                # dd if=$PATCH_FILE of="$GADGET_PATH/$GADGET" bs=1 seek=$BASE_SUNXI_PNT3 count=4 conv=notrunc >/dev/null 2>/dev/null
+                # status $?
+
+                echo "[*] Patching Manufacturer value"
+                padding "$1" "32" # pad manufacturer name to 32 characters
+                dd if=$PATCH_FILE of="$GADGET_PATH/$GADGET" bs=1 seek=$BASE_MANF_STR count=32 conv=notrunc >/dev/null 2>/dev/null
+                status $?
+            fi
+
+            if [[ ! -z "$2" ]]; then
+                echo "[*] Patching Product String Pointer"
+                echo -ne $PROD_PTR_PATCH > $PATCH_FILE
+                dd if=$PATCH_FILE of="$GADGET_PATH/$GADGET" bs=1 seek=$BASE_PROD count=4 conv=notrunc >/dev/null 2>/dev/null
+                status $?
+
+                echo "[*] Patching Product value"
+                padding "$2" "32" # pad product name to 32 characters
+                dd if=$PATCH_FILE of="$GADGET_PATH/$GADGET" bs=1 seek=$BASE_PROD_STR count=32 conv=notrunc >/dev/null 2>/dev/null
+                status $?
+            fi
+
+            # echo "[*] Patching iSerial String Pointer"
+            # echo -ne $SERIAL_STR_PTR_PATCH > $PATCH_FILE
+            # dd if=$PATCH_FILE of="$GADGET_PATH/$GADGET" bs=1 seek=$BASE_SERIAL_STR_PTR count=4 conv=notrunc >/dev/null 2>/dev/null
+            # status $?
+
+            # echo "[*] Patching iSerial Pointer"
+            # echo -ne $SERIAL_PTR_PATCH > $PATCH_FILE
+            # dd if=$PATCH_FILE of="$GADGET_PATH/$GADGET" bs=1 seek=$BASE_SERIAL_PTR count=4 conv=notrunc >/dev/null 2>/dev/null
+            # status $?
+            ;;
+
+    esac
+fi
