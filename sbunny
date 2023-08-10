@@ -15,7 +15,6 @@ cat << EOM
 EOM
 
 # GADGET file path and backup details
-# GADGET_PATH="/home/mburch/scripts/stealthbunny"
 GADGET_PATH="/usr/local/bunny/lib"
 GADGET="bunny_gadget.ko"
 GADGET_SUM="7a27b30f074a40758a9e50ff80ab286d79d1b5c57519fcc5d5ecf5fcbeeee032"
